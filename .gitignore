@@ -1,0 +1,10 @@
+# 编译产生的文件
+build/
+.cache/
+
+# 本地编辑器配置
+.vscode/
+.settings/
+
+# CubeMX 临时文件
+mx.scratch
