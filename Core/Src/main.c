@@ -48,9 +48,17 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+
 uint16_t adc_buffer[16];
 
-volatile uint8_t adc_dma_done = 0;
+
+// 前 8 个数据已经采集完成
+volatile uint8_t dma_half_ready = 0;
+
+// 后 8 个数据已经采集完成
+volatile uint8_t dma_full_ready = 0;
+
+
 // volatile 是 C 语言中的关键字。
 // 它在这里的作用是告诉编译器：
 // 这个变量可能被中断处理流程修改，主程序读取它时，应保留实际的内存访问。
@@ -136,38 +144,54 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
-    /* USER CODE BEGIN 3 */
-    if (adc_dma_done == 1)
+  /* USER CODE BEGIN 3 */
+
+    if (dma_half_ready || dma_full_ready)
     {
-        adc_dma_done = 0;
+        uint8_t start;
 
-        // 停止 TIM3，避免继续触发 ADC
-        HAL_TIM_Base_Stop(&htim3);
+        // 判断哪一半数据已经准备好
+        if (dma_half_ready)
+        {
+            dma_half_ready = 0;
+            start = 0;
+        }
+        else
+        {
+            dma_full_ready = 0;
+            start = 8;
+        }
 
-        // 停止本次 ADC DMA 采集
-        HAL_ADC_Stop_DMA(&hadc1);
+        // 计算这一半数据的平均值
+        uint32_t sum = 0;
 
+        for (uint8_t i = start; i < start + 8; i++)
+        {
+            sum += adc_buffer[i];
+        }
+
+        uint32_t average = sum / 8;
+
+        // 串口输出
         char uart_buf[64];
 
-        for (uint8_t i = 0; i < 16; i++)
-        {
-            int len = snprintf(
-                uart_buf,
-                sizeof(uart_buf),
-                "ADC[%u] = %u\r\n",
-                (unsigned int)i,
-                (unsigned int)adc_buffer[i]
-            );
+        int len = snprintf(
+            uart_buf,
+            sizeof(uart_buf),
+            "DMA[%u-%u] Average = %lu\r\n",
+            (unsigned int)start,
+            (unsigned int)(start + 7),
+            (unsigned long)average
+        );
 
-            if (len > 0 && len < (int)sizeof(uart_buf))
-            {
-                HAL_UART_Transmit(
-                    &huart1,
-                    (uint8_t *)uart_buf,
-                    (uint16_t)len,
-                    1000
-                );
-            }
+        if (len > 0 && len < (int)sizeof(uart_buf))
+        {
+            HAL_UART_Transmit(
+                &huart1,
+                (uint8_t *)uart_buf,
+                (uint16_t)len,
+                1000
+            );
         }
     }
   }
@@ -377,17 +401,29 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
+
 /* USER CODE BEGIN 4 */
 
+// DMA 半传输完成回调
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc->Instance == ADC1)
+    {
+        dma_half_ready = 1;
+    }
+}
+
+// DMA 全部传输完成回调
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
     if (hadc->Instance == ADC1)
     {
-        adc_dma_done = 1;
+        dma_full_ready = 1;
     }
 }
 
 /* USER CODE END 4 */
+
 
 /**
   * @brief  This function is executed in case of error occurrence.
